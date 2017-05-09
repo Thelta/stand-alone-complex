@@ -21,7 +21,6 @@ def create_command_parser():
 
 def login_user(server_info, socket, user_info):
     is_auth = False
-
     all_users = server_info["all_users"]
     online = server_info["online_users"]
 
@@ -36,11 +35,12 @@ def login_user(server_info, socket, user_info):
 
     if is_auth:
         socket.send(b"\\login_auth ok")
+        online[socket]["room"] = "ROOM_SELECT"
+        online[socket]["username"] = username
     else:
         socket.send(b"\\login_auth fail")
 
-    online[socket]["room"] = "ROOM_SELECT"
-    online[socket]["username"] = username
+    
 
 def create_new_user(server_info, socket, user_info):
     can_create = False
@@ -75,8 +75,12 @@ if __name__ == "__main__":
 
     server_socket = socket.socket()
     #TODO : Use socket.gethostname after finishing server side
-    server_socket.bind('localhost', PORT_NO)
+    server_socket.bind(('127.0.0.1', PORT_NO))
     server_socket.listen(10)
+
+    CONN_LIST.append(server_socket)
+
+    print("Listening")
 
     while True:
         read_sockets, write_sockets, error_sockets = select.select(CONN_LIST, [], [])
@@ -87,6 +91,8 @@ if __name__ == "__main__":
                 sockfd, addr = server_socket.accept()
                 CONN_LIST.append(sockfd)
 
+                print("Someone connected.")
+
                 conn_user = dict()
                 conn_user["room"] = "LOGIN_PAGE"
 
@@ -95,10 +101,10 @@ if __name__ == "__main__":
             else:
                 try:
                     data = sock.recv(RECV_BUFFER).decode("utf-8")
-                    command = data.split(' ')
+                    command = data.rstrip().split(' ')
                     command_info = com_parser.parse_args(command)
-                    if command_info.which in ARG_TYPES[online_users[socket]["room"]]:
-                        ARG_TYPES[online_users[socket]["room"]](server_info, socket, command_info)
+                    if command_info.which in ARG_TYPES[online_users[sock]["room"]]:
+                        ARG_TYPES[online_users[sock]["room"]][command_info.which](server_info, sock, command_info)
                 except:
                     pass
 
