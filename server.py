@@ -35,6 +35,17 @@ def create_command_parser():
     parser_create.add_argument("user_limit", nargs='?', type=int)
     parser_create.set_defaults(which="create_room")
 
+    #create subparser for CHAT_ROOM
+    parser_chat = subparsers.add_parser("\\chat")
+    parser_chat.add_argument("message", type=str)
+    parser_chat.set_defaults(which="chat")
+
+    parser_exit = subparsers.add_parser("\\exit_room")
+    parser_exit.set_defaults(which="exit_room")
+
+    parser_logout = subparsers.add_parser("\\logout")
+    parser_logout.set_defaults(which="logout")
+
     return parser
 
 def login_user(server_info, socket, user_info):
@@ -56,7 +67,7 @@ def login_user(server_info, socket, user_info):
         #TODO turn is_online flag to true
         online[socket]["page"] = "ROOM_SELECT"
         online[socket]["username"] = username
-        all_users[username]["is_online"] = True
+        #all_users[username]["is_online"] = True
 
         socket.send(b"\\login_auth ok")
     else:
@@ -106,6 +117,7 @@ def show_rooms(server_info, socket, user_info):
 
 def create_room(server_info, socket, user_info):
     chat_R = server_info["chat_rooms"]
+    parser = server_info["com_parser"]
 
     room_name = user_info.room_name
     password = user_info.password
@@ -134,7 +146,7 @@ def create_room(server_info, socket, user_info):
     socket.send(b"\\create_room_info ok")
 
     password = password if password != None else ""
-    join_info = com_parser.parse_known_args("\\join {0} {1}".format(room_name, password).split(' '))[0]
+    join_info = parser.parse_known_args("\\join {0} {1}".format(room_name, password).split(' '))[0]
     join_room(server_info, socket, join_info)
 
 #TODO add broadcast for a new user has entered to room
@@ -155,7 +167,39 @@ def join_room(server_info, socket, user_info):
         return
 
     server_info["online_users"][socket]["page"] = "CHAT_ROOM"
+    server_info["online_users"][socket]["room"] = room_name
     socket.send(b"\\join_info ok")
+
+def chat(server_info, socket, user_info):
+    chat_R = server_info["chat_rooms"]
+    online = server_info["online_users"]
+
+    message = user_info.message
+
+    room_name = online[socket]["room"]
+    for user_sock in chat_R[room_name]["users"]:
+        user_sock.send(message.encode())
+
+def exit_room(server_info, socket, user_info):
+    server_info["online_users"][socket]["page"] = "ROOM_SELECT"
+    server_info["online_users"][socket].pop("room")
+
+    server_info["chat_rooms"]["users"].remove(socket)
+
+    socket.send(b"\\exit_room_info ok")
+
+    parser = server_info["com_parser"]
+    show_info = parser.parse_known_args("\\show_rooms".split(' '))[0]
+    show_rooms(server_info, socket, show_info)
+
+def logout(server_info, socket, user_info):
+    if server_info["online_users"][socket]["page"] == "CHAT_ROOM":
+        server_info["chat_rooms"]["users"].remove(socket)
+
+    server_info["online_users"].pop(socket)
+    server_info["all_users"]["is_online"] = False
+
+    socket.send(b"\\logout ok")
 
 if __name__ == "__main__":
     #socket variables
@@ -163,15 +207,17 @@ if __name__ == "__main__":
     PORT_NO = 5000
     RECV_BUFFER = 4096
 
+    com_parser = create_command_parser()
+
     users = {"admin": {"password": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918", "is_online": False}}
     online_users = dict()
     chat_rooms = dict()
-    server_info = {"all_users": users, "online_users": online_users, "chat_rooms": chat_rooms}
+    server_info = {"all_users": users, "online_users": online_users, 
+                   "chat_rooms": chat_rooms, "com_parser": com_parser}
 
     ARG_TYPES = {"LOGIN_PAGE": {"login": login_user, "new_user": create_new_user},
-                 "ROOM_SELECT": {"join": join_room, "show_rooms": show_rooms, "create_room": create_room}}
-
-    com_parser = create_command_parser()
+                 "ROOM_SELECT": {"join": join_room, "show_rooms": show_rooms, "create_room": create_room, "logout": logout},
+                 "CHAT_ROOM": {"chat": chat, "exit_room": exit_room, "logout": logout}}
 
     server_socket = socket.socket()
     #TODO : Use socket.gethostname after finishing server side
