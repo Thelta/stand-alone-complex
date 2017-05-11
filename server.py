@@ -46,15 +46,19 @@ def login_user(server_info, socket, user_info):
     password = user_info.password
 
     if username in all_users:
-        if all_users[username] == password:
-            is_auth = True
-        else:
-            is_auth = False #Unnecessary?
+        if not all_users[username]["is_online"]:    #same user shouldn't use the account from two different environment
+            if all_users[username]["password"] == password:
+                is_auth = True
+            else:
+                is_auth = False #Unnecessary?
 
     if is_auth:
-        socket.send(b"\\login_auth ok")
-        online[socket]["room"] = "ROOM_SELECT"
+        #TODO turn is_online flag to true
+        online[socket]["page"] = "ROOM_SELECT"
         online[socket]["username"] = username
+        all_users[username]["is_online"] = True
+
+        socket.send(b"\\login_auth ok")
     else:
         socket.send(b"\\login_auth fail")
 
@@ -69,7 +73,10 @@ def create_new_user(server_info, socket, user_info):
 
     if username not in all_users:
         can_create = True
-        all_users[username] = password
+        all_users[username] = dict()
+        all_users[username]["password"] = password
+        all_users[username]["is_online"] = False
+        all_users["username"]["room"] = None
 
     if can_create:
         socket.send(b"\\create_acc_info ok")
@@ -81,7 +88,7 @@ def show_rooms(server_info, socket, user_info):
     chat_rooms_string = "Room Name \t\t Password \t Users Online\n\n"   #header
     for room_name, room_info in zip(chat_R.keys(), chat_R.values()):
         first_part = max(0, min(len(room_name), 10))
-        second_part = max(10, len(room_name))
+        second_part = max(10, len(room_name))   #some math for format
         line = room_name + " " * (10 - first_part) + "\t" * ((second_part + 8) // 8 + 1)
 
         if room_info["password"] is None:
@@ -102,7 +109,7 @@ def create_room(server_info, socket, user_info):
 
     room_name = user_info.room_name
     password = user_info.password
-    user_limit = user_info.user_limit
+    user_limit = user_info.user_limit if user_info.user_limit is not None else 220
 
     if room_name in chat_R:
         socket.send(b"\\create_room_info fail same_name")
@@ -124,13 +131,31 @@ def create_room(server_info, socket, user_info):
 
     chat_R[room_name] = new_room
 
-    server_info["online_users"][socket]["room"] = room_name
-
     socket.send(b"\\create_room_info ok")
 
+    password = password if password != None else ""
+    join_info = com_parser.parse_known_args("\\join {0} {1}".format(room_name, password).split(' '))[0]
+    join_room(server_info, socket, join_info)
 
+#TODO add broadcast for a new user has entered to room
 def join_room(server_info, socket, user_info):
-    a = 0
+    room_name = user_info.room_name
+    password = None if user_info.password == "" else user_info.password
+
+    chat_R = server_info["chat_rooms"]
+
+    if room_name in chat_R:
+        if chat_R[room_name]["password"] == password:
+            chat_R[room_name]["users"].append(socket)
+        else:
+            socket.send(b"\\join_info fail password")
+            return
+    else:
+        socket.send(b"\\join_info fail name")
+        return
+
+    server_info["online_users"][socket]["page"] = "CHAT_ROOM"
+    socket.send(b"\\join_info ok")
 
 if __name__ == "__main__":
     #socket variables
@@ -138,7 +163,7 @@ if __name__ == "__main__":
     PORT_NO = 5000
     RECV_BUFFER = 4096
 
-    users = {"admin" : "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918"}
+    users = {"admin": {"password": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918", "is_online": False}}
     online_users = dict()
     chat_rooms = dict()
     server_info = {"all_users": users, "online_users": online_users, "chat_rooms": chat_rooms}
@@ -169,17 +194,17 @@ if __name__ == "__main__":
                 print("Someone connected.")
 
                 conn_user = dict()
-                conn_user["room"] = "LOGIN_PAGE"
+                conn_user["page"] = "LOGIN_PAGE"
 
                 online_users[sockfd] = conn_user
-            #TODO control user
+
             else:
                 try:
                     data = sock.recv(RECV_BUFFER).decode("utf-8")
                     command = data.rstrip().split(' ')
                     command_info = com_parser.parse_known_args(command)[0]
-                    if command_info.which in ARG_TYPES[online_users[sock]["room"]]:
-                        ARG_TYPES[online_users[sock]["room"]][command_info.which](server_info, sock, command_info)
+                    if command_info.which in ARG_TYPES[online_users[sock]["page"]]:
+                        ARG_TYPES[online_users[sock]["page"]][command_info.which](server_info, sock, command_info)
                 except:
                     pass
 
