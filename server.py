@@ -1,9 +1,8 @@
+import sys
 import select
 import socket
 import argparse
 import base64
-
-#TODO all send commands will be exceptions
 
 def create_command_parser():
     parser = argparse.ArgumentParser(prog="PROG")
@@ -64,14 +63,13 @@ def login_user(server_info, socket, user_info):
                 is_auth = False #Unnecessary?
 
     if is_auth:
-        #TODO turn is_online flag to true
         online[socket]["page"] = "ROOM_SELECT"
         online[socket]["username"] = username
-        #all_users[username]["is_online"] = True
+        all_users[username]["is_online"] = True
 
-        socket.send(b"\\login_auth ok")
+        socket.send(b"\\login_info ok")
     else:
-        socket.send(b"\\login_auth fail")
+        socket.send(b"\\login_info fail")
 
 
 def create_new_user(server_info, socket, user_info):
@@ -90,9 +88,9 @@ def create_new_user(server_info, socket, user_info):
         all_users["username"]["room"] = None
 
     if can_create:
-        socket.send(b"\\create_acc_info ok")
+        socket.send(b"\\new_user_info ok")
     else:
-        socket.send(b"\\create_acc_info fail")
+        socket.send(b"\\new_user_info fail")
 
 def show_rooms(server_info, socket, user_info):
     chat_R = server_info["chat_rooms"]
@@ -149,7 +147,6 @@ def create_room(server_info, socket, user_info):
     join_info = parser.parse_known_args("\\join {0} {1}".format(room_name, password).split(' '))[0]
     join_room(server_info, socket, join_info)
 
-#TODO add broadcast for a new user has entered to room
 def join_room(server_info, socket, user_info):
     room_name = user_info.room_name
     password = None if user_info.password == "" else user_info.password
@@ -158,7 +155,11 @@ def join_room(server_info, socket, user_info):
 
     if room_name in chat_R:
         if chat_R[room_name]["password"] == password:
-            chat_R[room_name]["users"].append(socket)
+            if len(chat_R[room_name]["users"]) + 1 <= chat_R[room_name]["user_limit"]:
+                chat_R[room_name]["users"].append(socket)
+            else:
+                socket.send(b"\\join_info fail users")
+                return
         else:
             socket.send(b"\\join_info fail password")
             return
@@ -174,7 +175,9 @@ def chat(server_info, socket, user_info):
     chat_R = server_info["chat_rooms"]
     online = server_info["online_users"]
 
-    message = user_info.message
+    username = online[socket]["username"]
+
+    message = "\\chat_info pass {} {}".format(username,user_info.message)
 
     room_name = online[socket]["room"]
     for user_sock in chat_R[room_name]["users"]:
@@ -202,9 +205,15 @@ def logout(server_info, socket, user_info):
     socket.send(b"\\logout ok")
 
 if __name__ == "__main__":
+    if (len(sys.argv) < 3):
+        print('Usage : python server.py hostname port')
+        sys.exit()
+
+    host = sys.argv[1]
+    PORT_NO = int(sys.argv[2])
+
     #socket variables
     CONN_LIST = []
-    PORT_NO = 5000
     RECV_BUFFER = 4096
 
     com_parser = create_command_parser()
@@ -220,8 +229,7 @@ if __name__ == "__main__":
                  "CHAT_ROOM": {"chat": chat, "exit_room": exit_room, "logout": logout}}
 
     server_socket = socket.socket()
-    #TODO : Use socket.gethostname after finishing server side
-    server_socket.bind(('127.0.0.1', PORT_NO))
+    server_socket.bind((host, PORT_NO))
     server_socket.listen(10)
 
     CONN_LIST.append(server_socket)
@@ -247,10 +255,12 @@ if __name__ == "__main__":
             else:
                 try:
                     data = sock.recv(RECV_BUFFER).decode("utf-8")
+                    if data == "":
+                        continue
                     command = data.rstrip().split(' ')
                     command_info = com_parser.parse_known_args(command)[0]
                     if command_info.which in ARG_TYPES[online_users[sock]["page"]]:
                         ARG_TYPES[online_users[sock]["page"]][command_info.which](server_info, sock, command_info)
                 except:
-                    pass
+                    continue
 
