@@ -6,7 +6,7 @@ import getpass
 import hashlib
 import os
 import argparse
-import client_info
+import signal
 
 
 def instruction_commands_parser():
@@ -181,6 +181,11 @@ def create_room_prompt(w):
 
     os.write(w, "\\create_room {0} {1} {2}\n".format(room_name, password, room_size).encode())
 
+def graceful_logout(signal, frame):
+    socket = socket_list[2]
+    socket.send(b"\\logout")
+
+
 if __name__ == "__main__":
     if (len(sys.argv) < 3):
         print('Usage : python client.py hostname port')
@@ -256,10 +261,12 @@ if __name__ == "__main__":
                     elif msg == "2":
                         create_room_prompt(w_pipe)
                     elif msg == "3":
-                        os.write(w_pipe, b"\show_rooms\n")
+                        os.write(w_pipe, b"\\show_rooms\n")
                     else:
                         sys.stdout.write("Select 1, 2 or 3\n\n")
                         show_room_menu()
                 elif page == "CHAT_ROOM":
+                    if msg == "": #we wouldn't want to send empty message
+                        continue
                     msg_64_byte = base64.b64encode(msg.encode()).decode()
                     os.write(w_pipe, "\\chat {}\n".format(msg_64_byte).encode())

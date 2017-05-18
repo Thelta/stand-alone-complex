@@ -196,13 +196,38 @@ def exit_room(server_info, socket, user_info):
     show_rooms(server_info, socket, show_info)
 
 def logout(server_info, socket, user_info):
+    print("logout")
+    username = server_info["online_users"][socket]["username"]
     if server_info["online_users"][socket]["page"] == "CHAT_ROOM":
         server_info["chat_rooms"]["users"].remove(socket)
 
     server_info["online_users"].pop(socket)
-    server_info["all_users"]["is_online"] = False
+    server_info["all_users"][username]["is_online"] = False
 
-    socket.send(b"\\logout ok")
+    socket.shutdown()
+    try:
+        sock.read_sockets(RECV_BUFFER)
+    finally:
+        socket.close()
+        server_info["conn_list"].pop(socket)
+
+def ungraceful_logout(server_info, sock):
+    print("disconnect")
+    if "username" in server_info["online_users"][sock]:
+        username = server_info["online_users"][sock]["username"]
+        server_info["all_users"][username]["is_online"] = False
+        if server_info["online_users"][sock]["page"] == "CHAT_ROOM":
+            server_info["chat_rooms"]["users"].remove(sock)
+    server_info["online_users"].pop(sock)
+
+
+    sock.shutdown(socket.SHUT_RDWR)
+    try:
+        sock.read_sockets(RECV_BUFFER)
+    except:
+        print("diss")
+    server_info["conn_list"].remove(sock)
+    sock.close()
 
 if __name__ == "__main__":
     if (len(sys.argv) < 3):
@@ -222,7 +247,7 @@ if __name__ == "__main__":
     online_users = dict()
     chat_rooms = dict()
     server_info = {"all_users": users, "online_users": online_users, 
-                   "chat_rooms": chat_rooms, "com_parser": com_parser}
+                   "chat_rooms": chat_rooms, "com_parser": com_parser, "conn_list": CONN_LIST}
 
     ARG_TYPES = {"LOGIN_PAGE": {"login": login_user, "new_user": create_new_user},
                  "ROOM_SELECT": {"join": join_room, "show_rooms": show_rooms, "create_room": create_room, "logout": logout},
@@ -256,6 +281,8 @@ if __name__ == "__main__":
                 try:
                     data = sock.recv(RECV_BUFFER).decode("utf-8")
                     if data == "":
+                        ungraceful_logout(server_info, sock)
+                        print(sock)
                         continue
                     command = data.rstrip().split(' ')
                     command_info = com_parser.parse_known_args(command)[0]
